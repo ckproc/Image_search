@@ -16,7 +16,7 @@ SDK的配置参数在config.cfg中，
 替换kdtree，去掉retrievalImage函数内部的互斥锁，使检索支持多线程。
 
 注意: C++接口请参照test.py中的getSimpleResult函数。
-若有疑问，请联系 黄子龙 QQ：843133702
+
 
 ps: 生成字典时，默认直接使用数据库中的目标图片。
 当有新的目标图片需要识别时，无需立即更新字典。
