@@ -4,12 +4,19 @@
 
 %{
 #include "imageRetrieval.h"
+
 %}
 
+
 struct RetrievalResult{
-	const char *imagePath;
+	const char *imagePath1;
+	const char *imagePath2;
+	const char *imagePath3;
+	const char *imagePath4;
 	float score;
 };
+
+
 
 class ImageRetrieval
 {

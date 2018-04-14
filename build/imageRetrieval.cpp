@@ -5,9 +5,10 @@
 #include <map>
 #include <config4cpp/Configuration.h>
 #include "imageRetrieval.h"
-#include "hesaff.h"
+//#include "hesaff.h"
 #include "time.h"
-
+#include "getorb.h"
+#define ln 2.718282
 extern "C"{
 #include "vl/vlad.h"
 #include "vl/gmm.h"
@@ -80,7 +81,7 @@ void ImageRetrieval::init(){
 
 void ImageRetrieval::generateUnclusterFeatures(Mat &featuresUnclustered){
 	//to store the current input image
-	Mat input;
+	//Mat input;
 	int len = 0;
 	const char *dir = par.databasePath.c_str();
 	vector<string> filenames = list_all_image_in_file(dir);
@@ -92,9 +93,9 @@ void ImageRetrieval::generateUnclusterFeatures(Mat &featuresUnclustered){
 		random_shuffle( ra1.begin(), ra1.end() );
 	cout << numFile << " image featute will be added !" << endl;
 
-	float IMAGE_SQUARE;
+	/*float IMAGE_SQUARE;
 	if (!par.retrievalType.compare("STATIC")){
-		IMAGE_SQUARE = 300000.0;
+		IMAGE_SQUARE = 307200.0;
 	}
 	else if (!par.retrievalType.compare("DYNAMIC")){
 		IMAGE_SQUARE = 200000.0;
@@ -103,9 +104,12 @@ void ImageRetrieval::generateUnclusterFeatures(Mat &featuresUnclustered){
 		cerr << "there is not this retrieval type !" << endl;
 		exit(1);
 	}
-
+	*/
+    //ofstream in;
+	//in.open("numkeypoints.txt",ios::trunc);
 	for (size_t i=0; i < numFile; ++i){
 		string filename = filenames[ra1[i]];
+		/*
 		input = imread(filename, CV_LOAD_IMAGE_COLOR); //Load as grayscale GRAYSCALE
 		if (input.empty() || input.rows <= 0 || input.cols <= 0) 
 			continue;
@@ -113,10 +117,14 @@ void ImageRetrieval::generateUnclusterFeatures(Mat &featuresUnclustered){
 		double scale = sqrt(IMAGE_SQUARE/(float)(input.cols*input.rows));
 		resize(input, input, Size(), scale, scale);
 		printf("%s %d %d\n", filename.c_str(), input.cols, input.rows);
-
+        */
 		Mat descriptor_AffineHessian;
 		Mat frame; //unused
-		getAffineHessianDescriptor(input, descriptor_AffineHessian, frame);
+		//getAffineHessianDescriptor(input, descriptor_AffineHessian, frame);
+		getAffineHessianDescriptor(filename, descriptor_AffineHessian);
+		if(descriptor_AffineHessian.rows==0||descriptor_AffineHessian.cols==0)
+			continue;
+		//in<<descriptor_AffineHessian.rows<<"\n";
 		//put the all feature descriptors in a single Mat object
 		vector<int> ra2(descriptor_AffineHessian.rows);
 		for (size_t j = 0; j < descriptor_AffineHessian.rows; ++j)
@@ -128,6 +136,7 @@ void ImageRetrieval::generateUnclusterFeatures(Mat &featuresUnclustered){
 			featuresUnclustered.push_back(descriptor_AffineHessian.row(ra2[j]));
 		cout << (++len) << " images feature added ! ( " << ra1[i] << " , " << numDescriptor << " )" << endl;
 	}
+	//in.close();
 	featuresUnclustered.convertTo(featuresUnclustered, CV_32F);
 }
 
@@ -314,6 +323,140 @@ void ImageRetrieval::deleteFeatureFromPool(char* blackListText)
 	replaceMembers(tmp_filenames, tmp_featureDb, forest_);
 
 }
+void cdm(int kk,float thres,DbFeature &db){
+	int N=db.imageName.size();
+	float S1=0;
+	float S2=0;
+	Mat deta(1,N,CV_32FC1,Scalar::all(1.0));
+	Mat Distance( N, N, CV_32FC1, Scalar::all(0.0));
+	for(int i=0;i<N;i++){
+		for(int j=0;j<N;j++){
+			float distance=0.;
+			for(int p=0;p<db.imageFeature[0].descriptor.cols;p++){
+			distance=distance+abs(db.imageFeature[i].descriptor.ptr<float>(0)[p]-db.imageFeature[j].descriptor.ptr<float>(0)[p]);
+			}
+			Distance.ptr<float>(i)[j]=distance;
+		}
+	}
+	Mat Dis;
+	Distance.copyTo(Dis);
+	int m=2;
+	//iteration 1
+	  vector<float> r1(N,0);
+	  for(int i=0;i<N;i++){
+		   vector<float> ith1(N);
+		  for(int j=0;j<N;j++){
+			  ith1[j]=Distance.ptr<float>(i)[j];
+		  }
+		  int max = (int)(max_element(ith1.begin(), ith1.end()) - ith1.begin());
+		  for(int j=0;j<kk;j++){
+			  int min=(int)(min_element(ith1.begin(), ith1.end()) - ith1.begin());
+			  r1[i]=r1[i]+ith1[min];
+			  ith1[min]=ith1[max];
+		  }
+		  r1[i]=r1[i]/kk;
+	  }
+	
+	  float rr1=0.0;
+	  for(int i=0;i<N;i++){
+		  rr1=rr1+log(r1[i]);
+	  }
+	  rr1=rr1/N;
+	  rr1=pow((float)ln, (float)rr1);
+	  //cout<<rr1<<endl;
+	  //cout<<"rr1"<<endl;
+
+	  for(int i=0;i<N;i++){
+		  deta.at<float>(0,i)=deta.at<float>(0,i)*sqrt(rr1/r1[i]);
+	  }
+      Mat diag(N,N,CV_32FC1, Scalar::all(0.0));
+	  for(int i=0; i<N; i++) {
+		  diag.ptr<float>(i)[i]=deta.ptr<float>(0)[i];
+	  }
+	  Distance=diag*Dis*diag;
+	  for(int i=0;i<N;i++){
+		  S1=S1+abs(r1[i]-rr1);
+	  }
+	  	  
+	  //iteration 2
+	  vector<float> r2(N,0);
+	  for(int i=0;i<N;i++){
+		   vector<float> ith2(N);
+		  for(int j=0;j<N;j++){
+			  ith2[j]=Distance.ptr<float>(i)[j];
+		  }
+		  int max = (int)(max_element(ith2.begin(), ith2.end()) - ith2.begin());
+		  for(int j=0;j<kk;j++){
+			  int min=(int)(min_element(ith2.begin(), ith2.end()) - ith2.begin());
+			  r2[i]=r2[i]+ith2[min];
+			  ith2[min]=ith2[max];
+		  }
+		  r2[i]=r2[i]/kk;
+	  }
+	  float rr2=0.0;
+	  for(int i=0;i<N;i++){
+		  rr2=rr2+log(r2[i]);
+	  }
+	  rr2=rr2/N;
+	  rr2=pow((float)ln, (float)rr2);
+	  for(int i=0;i<N;i++){
+		  deta.at<float>(0,i)=deta.at<float>(0,i)*sqrt(rr2/r2[i]);
+	  }
+      // diag(N,N,CV_32FC1, Scalar::all(0.0))
+	  for(int i=0;i<N;i++){
+		  diag.ptr<float>(i)[i]=deta.ptr<float>(0)[i];
+	  }
+	  Distance=diag*Dis*diag;
+	  for(int i=0;i<N;i++){
+		  S2=S2+abs(r2[i]-rr2);
+	  }
+  
+	while((S1-S2)>=thres)
+	{	
+	  float S=0;
+	  m=m+1;
+	  cout<<"iteration"<<m<<endl;
+	  vector<float> r(N,0);
+	  for(int i=0;i<N;i++){
+		  vector<float> ith(N);
+		  for(int j=0;j<N;j++){
+			  ith[j]=Distance.ptr<float>(i)[j];
+		  }
+		  int max = (int)(max_element(ith.begin(), ith.end()) - ith.begin());
+		  for(int j=0;j<kk;j++){
+			  int min=(int)(min_element(ith.begin(), ith.end()) - ith.begin());
+			  r[i]=r[i]+ith[min];
+			  ith[min]=ith[max];
+		  }
+		  r[i]=r[i]/kk;
+		  
+		}	  
+	  float rr=0.0;
+	  for(int i=0;i<N;i++){
+		  rr=rr+log(r[i]);
+	  }
+	  rr=rr/N;
+	  rr=pow((float)ln, (float)rr);
+	  
+	  for(int i=0;i<N;i++){
+		  deta.at<float>(0,i)=deta.at<float>(0,i)*sqrt(rr/r[i]);
+	  }
+      //Mat diag(N,N,CV_32FC1, Scalar::all(0.0))
+	  for(int i=0;i<N;i++){
+		  diag.ptr<float>(i)[i]=deta.ptr<float>(0)[i];
+	  }
+	  Distance=diag*Dis*diag;
+	  for(int i=0;i<N;i++){
+		  S=S+abs(r[i]-rr);
+	  }
+	  S1=S2;
+	  S2=S;	  
+	}
+	 
+	for(int i=0;i<N;i++){
+		db.imageSigma.push_back(deta.ptr<float>(0)[i]);
+	}
+}
 
 void ImageRetrieval::buildFeaturePool(){
 	
@@ -326,15 +469,19 @@ void ImageRetrieval::buildFeaturePool(){
 		string filename = filenames[i];
 		cout << i <<"  "<< filename <<endl;
 		Feature fea = getFeature(filename.c_str());	
+		
 		if (!fea.descriptor.empty()) {
 			db.imageName.push_back(filenames[i]);
 			db.imageFeature.push_back(fea);
 		}
 	}
-	
 	clock_t endtime = clock();
 	cout << "Size of database :  " << db.imageName.size() << endl;
 	cout << "Extract feature time: " << (double)(endtime-starttime) / CLOCKS_PER_SEC << endl;
+		
+	int kk=10;
+	float thres=0.00001;
+	cdm(kk,thres,db);
 	
 	//*********************** build kdtree **********************//
     forest = buildIndex(db.imageFeature);
@@ -451,35 +598,140 @@ float geometricVerification(const Feature &fea1, const Feature &fea2){
 	return (float)inliers[best].size()/(p->frame).cols;
 }
 
+
+
 RetrievalResult ImageRetrieval::retrievalImage(const char *imagePath, int k){
 	
 	RetrievalResult result;
 	Feature fea = getFeature(imagePath);
 	if (fea.descriptor.empty()){
 		cout << "get feature error!\t";
-		result.imagePath = "";
+		result.imagePath1 = "";
+		result.imagePath2 = "";
+		result.imagePath3 = "";
+		result.imagePath4 = "";
 		result.score = 0;
 		return result;
+	}
+	
+	
+	
+	//int N=db.imageName.size();
+	//int total1=0;
+	//int total2=0;
+	//int total3=0;
+	//int total4=0;
+	
+	for(size_t i=0;i<N;i++){
+		float *queryPt = (float *)db.imageFeature[i].descriptor.data;
+	    VlKDForestSearcher *searcher = vl_kdforest_new_searcher(forest.kdtree);
+	    VlKDForestNeighbor *neighbours = new VlKDForestNeighbor[k];
+	
+	    int nvisited = vl_kdforestsearcher_query(searcher, neighbours, k, queryPt);
+	  vector<float> score(k);
+      for (size_t j = 0; j < k; j ++){
+		//float scores = geometricVerification(fea,db.imageFeature[neighbours[i].index]);
+		float dis=0;
+		   for(int p=0;p<db.imageFeature[0].descriptor.cols;p++){
+			   dis=dis+abs(db.imageFeature[neighbours[j].index].descriptor.ptr<float>(0)[p]-db.imageFeature[i].descriptor.ptr<float>(0)[p]);
+			}
+		
+		   score[j]=dis*db.imageSigma[neighbours[j].index];
+	  }
+	  int queryid=atoi(db.imageName[i].substr(34,5).c_str());
+	  int max=(int)(max_element(score.begin(), score.end()) - score.begin());
+	  float value=score[max];
+	  //cout<<"min"<<distances[min]<<endl;
+	  int best = (int)(min_element(score.begin(), score.end()) - score.begin());
+	  score[best]=value;
+      result.imagePath1=db.imageName[neighbours[best].index].c_str();
+	  if(atoi(db.imageName[neighbours[best].index].substr(34, 5).c_str())/4==queryid/4){
+		  total1=total1+1;
+		  total2=total2+1;
+		  total3=total3+1;
+		  total4=total4+1;
+	  }
+	  //cout<<db.imageName[i]<<"---"<<db.imageName[neighbours[best].index]<<endl;
+	  
+	  best = (int)(min_element(score.begin(), score.end()) - score.begin());
+	  score[best]=value;
+      result.imagePath2=db.imageName[neighbours[best].index].c_str();
+	  if(atoi(db.imageName[neighbours[best].index].substr(34, 5).c_str())/4==queryid/4){
+		  //total1=total1+1;
+		  total2=total2+1;
+		  total3=total3+1;
+		  total4=total4+1;
+	  }
+	   //cout<<db.imageName[i]<<"---"<<db.imageName[neighbours[best].index]<<endl;
+	   
+	  best = (int)(min_element(score.begin(), score.end()) - score.begin());
+	  score[best]=value;
+      result.imagePath3=db.imageName[neighbours[best].index].c_str();
+	   //cout<<db.imageName[i]<<"---"<<db.imageName[neighbours[best].index]<<endl;
+	  if(atoi(db.imageName[neighbours[best].index].substr(34, 5).c_str())/4==queryid/4){
+		  //total1=total1+1;
+		  //total2=total2+1;
+		  total3=total3+1;
+		  total4=total4+1;
+	  } 
+	  best = (int)(min_element(score.begin(), score.end()) - score.begin());
+	  score[best]=value;
+      result.imagePath4=db.imageName[neighbours[best].index].c_str();
+	  if(atoi(db.imageName[neighbours[best].index].substr(34, 5).c_str())/4==queryid/4){
+		  //total1=total1+1;
+		  //total2=total2+1;
+		  //total3=total3+1;
+		  total4=total4+1;
+	  }
+	  //cout<<db.imageName[i]<<"---"<<db.imageName[neighbours[best].index]<<endl;
+	 
+	  cout<<"search image:"<<i<<endl;
+	  delete[] neighbours;
+	  vl_kdforestsearcher_delete(searcher);
 	}
 	
 	float *queryPt = (float *)fea.descriptor.data;
 	VlKDForestSearcher *searcher = vl_kdforest_new_searcher(forest.kdtree);
 	VlKDForestNeighbor *neighbours = new VlKDForestNeighbor[k];
 	int nvisited = vl_kdforestsearcher_query(searcher, neighbours, k, queryPt);
- 
-	vector<float> distances;
-	for (size_t i = 0; i < k; i ++){
-		float scores = geometricVerification(fea,db.imageFeature[neighbours[i].index]);
-		distances.push_back(scores);
+	vector<float> score(k);
+    for (size_t i = 0; i < k; i ++){
+		//float scores = geometricVerification(fea,db.imageFeature[neighbours[i].index]);
+		float dis=0;
+		   for(int p=0;p<db.imageFeature[0].descriptor.cols;p++){
+			   dis=dis+abs(db.imageFeature[neighbours[i].index].descriptor.ptr<float>(0)[p]-fea.descriptor.ptr<float>(0)[p]);
+			}
+		
+		score[i]=dis*db.imageSigma[neighbours[i].index];
 	}
-	int best = (int)(max_element(distances.begin(), distances.end()) - distances.begin());
-	string match_frame_name = db.imageName[neighbours[best].index];
- 
- 	delete[] neighbours;
+	
+      	
+	  int max=(int)(max_element(score.begin(), score.end()) - score.begin());
+	  float value=score[max];
+	  //cout<<"min"<<distances[min]<<endl;
+	  int best = (int)(min_element(score.begin(), score.end()) - score.begin());
+	  score[best]=value;
+      result.imagePath1=db.imageName[neighbours[best].index].c_str();
+	  
+	   best = (int)(min_element(score.begin(), score.end()) - score.begin());
+	  score[best]=value;
+      result.imagePath2=db.imageName[neighbours[best].index].c_str();
+	   
+	  best = (int)(min_element(score.begin(), score.end()) - score.begin());
+	  score[best]=value;
+      result.imagePath3=db.imageName[neighbours[best].index].c_str();
+	   
+	  best = (int)(min_element(score.begin(), score.end()) - score.begin());
+	  score[best]=value;
+      result.imagePath4=db.imageName[neighbours[best].index].c_str();   
+	 
+	   
+	  result.score=0;
+    delete[] neighbours;
 	vl_kdforestsearcher_delete(searcher);
- 
-	result.imagePath = match_frame_name.c_str();
-	result.score = distances[best];
+	
+ 	
+	
 	return result;
 }
 
@@ -552,7 +804,10 @@ Feature ImageRetrieval::getFeature(const char *path){
     char filename[1024];
     sprintf(filename, path);
     //read the image
-    Mat img=imread(filename,CV_LOAD_IMAGE_COLOR);//GRAYSCALE
+	
+    /*
+	Mat img=imread(filename,CV_LOAD_IMAGE_COLOR);//GRAYSCALE
+	
 	if (img.empty() || img.rows <= 0 || img.cols <= 0){
 		cout << "This image is null!" << endl;
         return feature;
@@ -560,8 +815,9 @@ Feature ImageRetrieval::getFeature(const char *path){
 	
 	float IMAGE_SQUARE;
 	if (!par.retrievalType.compare("STATIC")){
-		IMAGE_SQUARE = 300000.0;
+		IMAGE_SQUARE = 307200.0;
 	}
+	
 	else if (!par.retrievalType.compare("DYNAMIC")){
 		IMAGE_SQUARE = 200000.0;
 		bool detected = true;
@@ -571,27 +827,36 @@ Feature ImageRetrieval::getFeature(const char *path){
 		cerr << "there is not this retrieval type !" << endl;
 		exit(1);
 	}
+	
     double scale = sqrt(IMAGE_SQUARE/(float)(img.cols*img.rows));
     resize(img, img, Size(), scale, scale);
-
+   */
 	//To store the BoW (or BoF) representation of the image
     Mat descriptors;
-    getAffineHessianDescriptor(img, descriptors, feature.frame);
-	//create a nearest neighbor matcher
-	Ptr<DescriptorMatcher> matcher(new FlannBasedMatcher);
-    matcher->add( vector<Mat>(1, codebook.dictionary) );
-	// Match keypoint descriptors to cluster center (to dictionary)
-	vector<DMatch> matches;
-	matcher->match( descriptors, matches );
-	
-	feature.word = Mat( 1, descriptors.rows, CV_32F, Scalar::all(0.0) );
-	float *wptr = (float*)feature.word.data;
-	for( size_t i = 0; i < matches.size(); i++ ){
-		int queryIdx = matches[i].queryIdx;
-		int trainIdx = matches[i].trainIdx; // cluster index
-		CV_Assert( queryIdx == (int)i );
-		wptr[queryIdx] = trainIdx;
+    //getAffineHessianDescriptor(img, descriptors, feature.frame);
+	getAffineHessianDescriptor(filename, descriptors);
+	if (descriptors.rows==0){
+		cout << "This image is null!" << endl;
+        return feature;
 	}
+	
+	//create a nearest neighbor matcher
+	
+	//Ptr<DescriptorMatcher> matcher(new FlannBasedMatcher);
+   // matcher->add( vector<Mat>(1, codebook.dictionary) );
+	// Match keypoint descriptors to cluster center (to dictionary)
+	//vector<DMatch> matches;
+	//matcher->match( descriptors, matches );
+	
+	//feature.word = Mat( 1, descriptors.rows, CV_32F, Scalar::all(0.0) );
+	//float *wptr = (float*)feature.word.data;
+	
+	//for( size_t i = 0; i < matches.size(); i++ ){
+	//	int queryIdx = matches[i].queryIdx;
+	//	int trainIdx = matches[i].trainIdx; // cluster index
+	//	CV_Assert( queryIdx == (int)i );
+	//	wptr[queryIdx] = trainIdx;
+	//}
 	
 	if(!par.encodeType.compare("BOW")){
 			getBOW(feature.word, codebook.dictionary, feature.descriptor);
@@ -606,12 +871,16 @@ Feature ImageRetrieval::getFeature(const char *path){
 	}
 	else if(!par.encodeType.compare("FV")){
 		if (par.usePCA){
+			
 			Mat pcaDescriptors = pca.project(descriptors);
+			
 			getFV(pcaDescriptors, codebook.means, codebook.covariances, codebook.priors, feature.descriptor);
+			
 		}
 		else
 			getFV(descriptors, codebook.means, codebook.covariances, codebook.priors, feature.descriptor);
 	}
+	
 	else{
 		cerr << "there is not this encode method !" << endl;
 		exit(1);
@@ -637,6 +906,10 @@ void ImageRetrieval::saveFeaturePool(const char *featureFile) {
 	for (size_t i = 0; i < db.imageFeature.size(); ++i)
 		fs << db.imageFeature[i].word;
 	fs << "]" << "}";
+	fs << "imageSigma" <<"[";
+	for(size_t i = 0; i < db.imageSigma.size(); ++i)
+		fs << db.imageSigma[i];
+	fs << "]";
 	fs.release();
 }
 
@@ -648,6 +921,7 @@ void ImageRetrieval::loadFeaturePool(const char *featureFile) {
 	
 	db.imageName.clear();
 	db.imageFeature.clear();
+	db.imageSigma.clear();
 	cout << endl << "start load feature,please wait ......" << endl;
 	FileStorage fs(featureFile, FileStorage::READ);
 	FileNode fn1 = fs["imageName"]; 
@@ -668,6 +942,12 @@ void ImageRetrieval::loadFeaturePool(const char *featureFile) {
 	FileNodeIterator it4 = fn4.begin(), it4_end = fn4.end(); 
 	for (size_t i = 0; it4 != it4_end; ++it4, ++i)
 		(*it4) >> db.imageFeature[i].word;
+	
+	FileNode fn5 = fs["imageSigma"]; 
+	FileNodeIterator it5 = fn5.begin(), it5_end = fn5.end(); 
+	for (; it5 != it5_end; ++it5)
+		db.imageSigma.push_back((float)*it5);
+	
 	fs.release();
 	cout << "finish load feature ." << endl;
 

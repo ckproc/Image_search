@@ -30,16 +30,21 @@ struct Feature {
 	Mat frame;
     Mat word;
 	Mat descriptor;
+	
 };
 
 struct DbFeature {
 	vector<String> imageName;
     vector<Feature> imageFeature;
+	vector<float> imageSigma;
 };
 
 
 struct RetrievalResult{
-	const char *imagePath;
+	const char *imagePath1;
+	const char *imagePath2;
+	const char *imagePath3;
+	const char *imagePath4;
 	float score;
 };
 
