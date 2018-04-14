@@ -7,6 +7,7 @@
 #include "imageRetrieval.h"
 #include "hesaff.h"
 #include "time.h"
+//#include "getorb.h"
 
 extern "C"{
 #include "vl/vlad.h"
@@ -80,6 +81,7 @@ void ImageRetrieval::init(){
 
 void ImageRetrieval::generateUnclusterFeatures(Mat &featuresUnclustered){
 	//to store the current input image
+	
 	Mat input;
 	int len = 0;
 	const char *dir = par.databasePath.c_str();
@@ -91,7 +93,7 @@ void ImageRetrieval::generateUnclusterFeatures(Mat &featuresUnclustered){
 	if (numFile == 8000)
 		random_shuffle( ra1.begin(), ra1.end() );
 	cout << numFile << " image featute will be added !" << endl;
-
+    
 	float IMAGE_SQUARE;
 	if (!par.retrievalType.compare("STATIC")){
 		IMAGE_SQUARE = 300000.0;
@@ -103,9 +105,12 @@ void ImageRetrieval::generateUnclusterFeatures(Mat &featuresUnclustered){
 		cerr << "there is not this retrieval type !" << endl;
 		exit(1);
 	}
+    //ofstream in;
+	//in.open("siftkeypoints.txt",ios::trunc);
 
 	for (size_t i=0; i < numFile; ++i){
 		string filename = filenames[ra1[i]];
+		
 		input = imread(filename, CV_LOAD_IMAGE_COLOR); //Load as grayscale GRAYSCALE
 		if (input.empty() || input.rows <= 0 || input.cols <= 0) 
 			continue;
@@ -113,10 +118,12 @@ void ImageRetrieval::generateUnclusterFeatures(Mat &featuresUnclustered){
 		double scale = sqrt(IMAGE_SQUARE/(float)(input.cols*input.rows));
 		resize(input, input, Size(), scale, scale);
 		printf("%s %d %d\n", filename.c_str(), input.cols, input.rows);
-
+           
 		Mat descriptor_AffineHessian;
 		Mat frame; //unused
 		getAffineHessianDescriptor(input, descriptor_AffineHessian, frame);
+		
+		//getorb(filename, descriptor_AffineHessian, frame);
 		//put the all feature descriptors in a single Mat object
 		vector<int> ra2(descriptor_AffineHessian.rows);
 		for (size_t j = 0; j < descriptor_AffineHessian.rows; ++j)
@@ -128,7 +135,9 @@ void ImageRetrieval::generateUnclusterFeatures(Mat &featuresUnclustered){
 			featuresUnclustered.push_back(descriptor_AffineHessian.row(ra2[j]));
 		cout << (++len) << " images feature added ! ( " << ra1[i] << " , " << numDescriptor << " )" << endl;
 	}
+	//in.close();
 	featuresUnclustered.convertTo(featuresUnclustered, CV_32F);
+	
 }
 
 void kMeans(const Mat &featuresUnclustered, Mat &dictionary, int k){
@@ -452,34 +461,41 @@ float geometricVerification(const Feature &fea1, const Feature &fea2){
 }
 
 RetrievalResult ImageRetrieval::retrievalImage(const char *imagePath, int k){
-	
+	//cout<<"p1"<<endl;
 	RetrievalResult result;
+	
 	Feature fea = getFeature(imagePath);
-	if (fea.descriptor.empty()){
-		cout << "get feature error!\t";
-		result.imagePath = "";
-		result.score = 0;
-		return result;
-	}
+	//cout<<"p2"<<endl;
+	//if (fea.descriptor.empty()){
+	//	cout << "get feature error!\t";
+	//	result.imagePath = "";
+	//	result.score = 0;
+	//	return result;
+	//}
 	
 	float *queryPt = (float *)fea.descriptor.data;
 	VlKDForestSearcher *searcher = vl_kdforest_new_searcher(forest.kdtree);
 	VlKDForestNeighbor *neighbours = new VlKDForestNeighbor[k];
 	int nvisited = vl_kdforestsearcher_query(searcher, neighbours, k, queryPt);
- 
-	vector<float> distances;
-	for (size_t i = 0; i < k; i ++){
-		float scores = geometricVerification(fea,db.imageFeature[neighbours[i].index]);
-		distances.push_back(scores);
-	}
-	int best = (int)(max_element(distances.begin(), distances.end()) - distances.begin());
-	string match_frame_name = db.imageName[neighbours[best].index];
- 
+	//cout<<"p3"<<endl;
+	result.imagePath.push_back(db.imageName[neighbours[0].index]);
+	result.imagePath.push_back(db.imageName[neighbours[1].index]);
+	result.imagePath.push_back(db.imageName[neighbours[2].index]);
+	//vector<float> distances;
+	//for (size_t i = 0; i < k; i ++){
+	//	float scores = geometricVerification(fea,db.imageFeature[neighbours[i].index]);
+	//	distances.push_back(scores);
+	//}
+	
+	//int best = (int)(max_element(distances.begin(), distances.end()) - distances.begin());
+	//string match_frame_name = db.imageName[neighbours[best].index];
+    //cout<<"p4"<<endl;
+	//string match_frame_name=db.imageName[neighbours[0].index];
  	delete[] neighbours;
 	vl_kdforestsearcher_delete(searcher);
- 
-	result.imagePath = match_frame_name.c_str();
-	result.score = distances[best];
+   
+	
+	result.score = 0;
 	return result;
 }
 
@@ -552,7 +568,8 @@ Feature ImageRetrieval::getFeature(const char *path){
     char filename[1024];
     sprintf(filename, path);
     //read the image
-    Mat img=imread(filename,CV_LOAD_IMAGE_COLOR);//GRAYSCALE
+    
+	Mat img=imread(filename,CV_LOAD_IMAGE_COLOR);//GRAYSCALE
 	if (img.empty() || img.rows <= 0 || img.cols <= 0){
 		cout << "This image is null!" << endl;
         return feature;
@@ -573,10 +590,15 @@ Feature ImageRetrieval::getFeature(const char *path){
 	}
     double scale = sqrt(IMAGE_SQUARE/(float)(img.cols*img.rows));
     resize(img, img, Size(), scale, scale);
-
+   
 	//To store the BoW (or BoF) representation of the image
     Mat descriptors;
     getAffineHessianDescriptor(img, descriptors, feature.frame);
+	//getorb(filename, descriptors, feature.frame);
+	if (descriptors.rows==0){
+		cout << "This image is null!" << endl;
+        return feature;
+	}
 	//create a nearest neighbor matcher
 	Ptr<DescriptorMatcher> matcher(new FlannBasedMatcher);
     matcher->add( vector<Mat>(1, codebook.dictionary) );
@@ -616,7 +638,7 @@ Feature ImageRetrieval::getFeature(const char *path){
 		cerr << "there is not this encode method !" << endl;
 		exit(1);
 	}
-	
+ 
     return feature;						
 
 }

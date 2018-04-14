@@ -39,7 +39,8 @@ struct DbFeature {
 
 
 struct RetrievalResult{
-	const char *imagePath;
+	//const char *imagePath;
+	vector<string> imagePath;
 	float score;
 };
 
